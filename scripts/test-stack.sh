@@ -30,11 +30,20 @@ check_url "JupyterLab"       http://localhost:8888/lab
 
 echo
 echo "==> Running notebooks headlessly inside the jupyter container"
-for nb in 00_setup_check 01_delta_lake_demo 02_iceberg_demo; do
+# 03 is markdown-heavy (UI tour) — no need to execute. The medallion notebooks
+# (04 ingest → 05 Delta → 06 Iceberg) must run in order: 04 produces the raw
+# data that 05 and 06 read.
+for nb in \
+    00_setup_check \
+    01_delta_lake_demo \
+    02_iceberg_demo \
+    04_ingest_open_data \
+    05_etl_delta_lakehouse \
+    06_etl_iceberg_lakehouse; do
     echo "  -- $nb.ipynb"
     docker compose exec -T jupyter \
         jupyter nbconvert --to notebook --execute \
-            --ExecutePreprocessor.timeout=300 \
+            --ExecutePreprocessor.timeout=600 \
             "/home/jovyan/work/${nb}.ipynb" \
             --output "/tmp/${nb}.executed.ipynb" >/dev/null
     green "     OK"

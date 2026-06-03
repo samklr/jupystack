@@ -7,14 +7,27 @@ Short, copy-pasteable tasks. Assumes you've done the quick-start in the README (
 1. Open http://localhost:8888/lab — no token by default.
 2. In the file browser open `00_setup_check.ipynb`.
 3. Run all cells (`Cell → Run All`). The last cell should print bucket names from `boto3.list_buckets()`.
-4. Repeat for `01_delta_lake_demo.ipynb`, then `02_iceberg_demo.ipynb`, then `03_spark_ui_guide.ipynb`.
-5. Watch each running job in the master UI at http://localhost:8080. After a notebook finishes (stops its `SparkSession`), refresh http://localhost:18080 — the app appears in the History Server within ~15 s.
+4. Repeat for `01_delta_lake_demo.ipynb` → `02_iceberg_demo.ipynb` → `03_spark_ui_guide.ipynb`.
+5. Then the open-data pipeline (run in this exact order — 05 and 06 read what 04 wrote):
+   - `04_ingest_open_data.ipynb` — pulls MovieLens (~1 MB CSV bundle) and 7 days of Wikipedia pageviews (~400 KB JSON) into `s3a://raw-data/`.
+   - `05_etl_delta_lakehouse.ipynb` — bronze → silver → gold in Delta, ending with a `MERGE INTO` and `DESCRIBE HISTORY`.
+   - `06_etl_iceberg_lakehouse.ipynb` — same pipeline in Iceberg, ending with snapshot-id time travel.
+6. Watch each running job in the master UI at http://localhost:8080. After a notebook finishes (stops its `SparkSession`), refresh http://localhost:18080 — the app appears in the History Server within ~15 s.
 
-Smoke-test all three headlessly (CI-style):
+Smoke-test all of them headlessly (CI-style):
 
 ```bash
 ./scripts/test-stack.sh
 ```
+
+### Where the open data comes from
+
+| Notebook | Dataset | Format | Source URL | Notes |
+|---|---|---|---|---|
+| `04` | MovieLens `ml-latest-small` | 4 CSVs in a ZIP | https://files.grouplens.org/datasets/movielens/ml-latest-small.zip | Stable since 2019. ~100K ratings, ~10K movies. |
+| `04` | Wikipedia top-1000 pageviews | JSON per day | https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/YYYY/MM/DD | Wikimedia REST API; requires a `User-Agent` header. Notebook fetches 7 consecutive days (2025-01-01 → 2025-01-07) so re-runs are deterministic. |
+
+Both are public, no API key required.
 
 ## 2. Connect host-side PySpark to the cluster
 

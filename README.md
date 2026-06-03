@@ -37,6 +37,9 @@ Then open **http://localhost:8888/lab** and run the notebooks in order:
 2. `01_delta_lake_demo.ipynb` — Delta CRUD + time travel.
 3. `02_iceberg_demo.ipynb` — Iceberg via the REST catalog.
 4. `03_spark_ui_guide.ipynb` — annotated tour of the Spark UI.
+5. `04_ingest_open_data.ipynb` — downloads **MovieLens** (CSV) + **Wikipedia pageviews** (JSON) into `s3a://raw-data/`.
+6. `05_etl_delta_lakehouse.ipynb` — bronze → silver → gold medallion on the open data, with `MERGE INTO` and `DESCRIBE HISTORY`.
+7. `06_etl_iceberg_lakehouse.ipynb` — same dataset, Iceberg flavour, with hidden partitioning, snapshot metadata tables, and snapshot-id time travel.
 
 End-to-end smoke test (after the stack is healthy):
 
@@ -170,7 +173,10 @@ See [docs/howto.md § Troubleshooting](docs/howto.md#10-troubleshooting) for the
 │       ├── 00_setup_check.ipynb
 │       ├── 01_delta_lake_demo.ipynb
 │       ├── 02_iceberg_demo.ipynb
-│       └── 03_spark_ui_guide.ipynb
+│       ├── 03_spark_ui_guide.ipynb
+│       ├── 04_ingest_open_data.ipynb         # MovieLens + Wikipedia pageviews → MinIO
+│       ├── 05_etl_delta_lakehouse.ipynb      # bronze → silver → gold (Delta) + MERGE
+│       └── 06_etl_iceberg_lakehouse.ipynb    # same pipeline in Iceberg + snapshot time travel
 ├── minio/
 │   └── init-buckets.sh        # creates spark-warehouse, spark-logs, raw-data
 ├── iceberg-rest/
