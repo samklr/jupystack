@@ -1,0 +1,10 @@
+.env
+.DS_Store
+*.log
+
+# Jupyter
+jupyter/notebooks/.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Local data (named volumes are managed by docker, but bind-mounted bits can leak)
+data/

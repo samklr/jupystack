@@ -1,0 +1,209 @@
+# Local Spark + Jupyter demo stack.
+# Bring up:   cp .env.example .env && docker compose up -d --build
+# Tear down:  docker compose down -v
+
+name: spark-demo
+
+networks:
+  sparknet:
+    driver: bridge
+
+volumes:
+  minio-data:
+  iceberg-data:
+
+services:
+  # ----------------------------------------------------------------------------
+  # MinIO + bucket bootstrap
+  # ----------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: minio
+    networks: [sparknet]
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    container_name: minio-init
+    networks: [sparknet]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: ["/bin/sh", "/init-buckets.sh"]
+    volumes:
+      - ./minio/init-buckets.sh:/init-buckets.sh:ro
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # Iceberg REST catalog
+  # ----------------------------------------------------------------------------
+  iceberg-rest:
+    image: tabular/iceberg-rest:1.6.0
+    platform: linux/amd64
+    container_name: iceberg-rest
+    networks: [sparknet]
+    ports:
+      - "8181:8181"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    env_file:
+      - ./iceberg-rest/catalog.env
+    environment:
+      # AWS SDK reads these directly; Iceberg REST forwards them to S3FileIO.
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ACCESS_KEY}
+      CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_SECRET_KEY}
+    volumes:
+      - iceberg-data:/tmp/warehouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/v1/config || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  iceberg-init:
+    image: curlimages/curl:8.10.1
+    container_name: iceberg-init
+    networks: [sparknet]
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        # Idempotent: 409 (already exists) is fine.
+        code=$$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+          -H 'Content-Type: application/json' \
+          -d '{"namespace":["demo"]}' \
+          http://iceberg-rest:8181/v1/namespaces)
+        echo "create demo namespace -> HTTP $$code"
+        [ "$$code" = "200" ] || [ "$$code" = "201" ] || [ "$$code" = "204" ] || [ "$$code" = "409" ]
+    restart: "no"
+
+  # ----------------------------------------------------------------------------
+  # Spark — built once, reused by master / worker / history via SPARK_ROLE.
+  # ----------------------------------------------------------------------------
+  spark-master:
+    build:
+      context: ./spark
+    image: spark-demo/spark:3.5.3
+    container_name: spark-master
+    networks: [sparknet]
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    environment:
+      SPARK_ROLE: master
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  spark-worker:
+    image: spark-demo/spark:3.5.3
+    container_name: spark-worker
+    networks: [sparknet]
+    ports:
+      - "8081:8081"
+    environment:
+      SPARK_ROLE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  spark-history:
+    image: spark-demo/spark:3.5.3
+    container_name: spark-history
+    networks: [sparknet]
+    ports:
+      - "18080:18080"
+    environment:
+      SPARK_ROLE: history
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ----------------------------------------------------------------------------
+  # JupyterLab
+  # ----------------------------------------------------------------------------
+  jupyter:
+    build:
+      context: ./jupyter
+    image: spark-demo/jupyter:3.5.3
+    container_name: jupyter
+    networks: [sparknet]
+    ports:
+      - "8888:8888"
+    environment:
+      SPARK_MASTER_URL: spark://spark-master:7077
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      S3_ENDPOINT: http://minio:9000
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN}
+      JUPYTER_ENABLE_LAB: "yes"
+      # Demo convenience — disable token when JUPYTER_TOKEN is empty.
+      DOCKER_STACKS_JUPYTER_CMD: lab
+    command:
+      - start-notebook.sh
+      - --ServerApp.token=${JUPYTER_TOKEN}
+      - --ServerApp.password=
+      - --ServerApp.root_dir=/home/jovyan/work
+    volumes:
+      - ./jupyter/notebooks:/home/jovyan/work
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_healthy
+      iceberg-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8888/lab || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
