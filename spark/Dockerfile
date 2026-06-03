@@ -20,8 +20,22 @@ ENV SPARK_HOME=/opt/spark \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        bash curl ca-certificates gettext-base procps tini python3 python3-pip; \
+        bash curl ca-certificates gettext-base procps tini \
+        software-properties-common gnupg; \
+    add-apt-repository -y ppa:deadsnakes/ppa; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        python3.11 python3.11-distutils; \
+    # PySpark only needs the interpreter on workers — no pip required.
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python3; \
+    ln -sf /usr/bin/python3.11 /usr/local/bin/python; \
+    apt-get purge -y software-properties-common gnupg; \
+    apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
+
+# Match the JupyterLab driver's Python so the worker doesn't fail with PYTHON_VERSION_MISMATCH.
+ENV PYSPARK_PYTHON=python3.11 \
+    PYSPARK_DRIVER_PYTHON=python3.11
 
 # Spark — --retry survives transient mirror hiccups; -# prints progress to the build log.
 RUN set -eux; \

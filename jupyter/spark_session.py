@@ -51,6 +51,11 @@ def get_spark(app_name: str = "jupyter-demo") -> SparkSession:
         )
         .config("spark.sql.catalog.iceberg.s3.endpoint", minio_endpoint)
         .config("spark.sql.catalog.iceberg.s3.path-style-access", "true")
+        .config("spark.sql.catalog.iceberg.s3.access-key-id", access_key)
+        .config("spark.sql.catalog.iceberg.s3.secret-access-key", secret_key)
+        # AWS SDK v2 requires a region even for MinIO; any value works.
+        .config("spark.sql.catalog.iceberg.client.region", "us-east-1")
+        .config("spark.sql.catalog.iceberg.s3.region", "us-east-1")
         # Event logs → MinIO so the History Server picks them up
         .config("spark.eventLog.enabled", "true")
         .config("spark.eventLog.dir", "s3a://spark-logs/events")

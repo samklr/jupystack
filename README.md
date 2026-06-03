@@ -6,7 +6,7 @@ Self-contained Docker Compose stack for local Apache Spark development and demos
 - Spark History Server
 - JupyterLab with matching PySpark, **Delta Lake 3.2.0** and **Apache Iceberg 1.6.1**
 - MinIO (S3-compatible object store) with three pre-created buckets
-- Iceberg REST catalog (`tabular/iceberg-rest`), `demo` namespace pre-created
+- Iceberg REST catalog (`tabulario/iceberg-rest`), `demo` namespace pre-created
 - Helper script for submitting jobs to a **remote Kubernetes** cluster
 
 Everything is wired so `docker compose up -d` produces a working stack — no manual configuration.
