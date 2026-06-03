@@ -48,6 +48,8 @@ def get_spark(app_name: str = "jupyter-demo") -> SparkSession:
         # HadoopFileIO reuses the S3A connector (same as Delta). S3FileIO via
         # AWS SDK v2 has native bits that crash with SIGABRT on Apple Silicon.
         .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO")
+        # Iceberg's vectorized Arrow reader crashes the JIT compiler on aarch64+JDK17.
+        .config("spark.sql.iceberg.vectorization.enabled", "false")
         # Event logs → MinIO so the History Server picks them up
         .config("spark.eventLog.enabled", "true")
         .config("spark.eventLog.dir", "s3a://spark-logs/events")
