@@ -2,14 +2,17 @@
 
 Self-contained Docker Compose stack for local Apache Spark development and demos:
 
-- Spark 3.5.3 standalone (master + 1 worker)
-- Spark History Server
-- JupyterLab with matching PySpark, **Delta Lake 3.2.0** and **Apache Iceberg 1.6.1**
-- MinIO (S3-compatible object store) with three pre-created buckets
-- Iceberg REST catalog (`tabulario/iceberg-rest`), `demo` namespace pre-created
+- **Spark 3.5.8** standalone (master + 1 worker), Python 3.11
+- **Spark History Server**
+- **JupyterLab** with matching PySpark, **Delta Lake 3.2.0** and **Apache Iceberg 1.6.1**
+- **MinIO** (S3-compatible object store) with three pre-created buckets
+- **Iceberg REST catalog** (`tabulario/iceberg-rest`), `demo` namespace pre-created
 - Helper script for submitting jobs to a **remote Kubernetes** cluster
 
 Everything is wired so `docker compose up -d` produces a working stack — no manual configuration.
+
+- [**Architecture diagrams**](docs/architecture.md) — service topology, boot order, Delta + Iceberg write paths, MinIO bucket layout, K8s submit topology.
+- [**How-to recipes**](docs/howto.md) — run the demo, connect from host PySpark, submit to remote K8s, swap MinIO for real S3, troubleshoot.
 
 ---
 
@@ -54,9 +57,11 @@ End-to-end smoke test (after the stack is healthy):
 | Iceberg REST catalog | http://localhost:8181/v1/config | — |
 | Spark master URL | `spark://localhost:7077` | — |
 
+See [docs/howto.md](docs/howto.md) for full recipes — sections below are quick references.
+
 ## Connecting from host-side PySpark
 
-Install matching PySpark on the host (`pip install pyspark==3.5.3`), then:
+Install matching PySpark on the host (`pip install pyspark==3.5.8`), then:
 
 ```python
 from pyspark.sql import SparkSession
@@ -86,7 +91,7 @@ The helper script `scripts/k8s-spark-submit.sh` wraps `spark-submit` with the ri
 
 ```bash
 export K8S_API=https://my-cluster.example.com:6443
-export SPARK_IMAGE=ghcr.io/my-org/spark:3.5.3        # must contain the same JARs as ./spark/Dockerfile
+export SPARK_IMAGE=ghcr.io/my-org/spark:3.5.8        # must contain the same JARs as ./spark/Dockerfile
 export S3_ENDPOINT=https://s3.eu-west-1.amazonaws.com  # what your cluster pods can reach
 export MINIO_ACCESS_KEY=...
 export MINIO_SECRET_KEY=...
@@ -123,52 +128,17 @@ Then change two configs:
 
 Rebuild only the Spark image: `docker compose build spark-master && docker compose up -d`.
 
-## Troubleshooting
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `S3AFileSystem` ClassNotFound | hadoop-aws JAR missing from classpath | Rebuild image: `docker compose build spark-master jupyter` |
-| **403 Forbidden** on S3A writes | Version skew between `hadoop-aws` and `aws-java-sdk-bundle` | Don't change the versions in the Dockerfile ARGs — they're pinned together on purpose |
-| Iceberg REST returns 500 on namespace create | MinIO creds wrong in `iceberg-rest/catalog.env` or env vars | `docker compose logs iceberg-rest`; check `AWS_ACCESS_KEY_ID` matches `.env` |
-| Worker container OOMs under load | Default 2 GiB too small | Bump `SPARK_WORKER_MEMORY=4g` in `.env`, restart `spark-worker` |
-| Delta JAR conflict (`NoSuchMethodError`) | A notebook is trying `--packages io.delta:delta-spark` | Don't — the JARs are already bundled; remove the package coordinate |
-| `spark.read("s3a://...")` hangs on first call | S3A trying default `s3.amazonaws.com` because `path.style.access` is false | Confirm `path.style.access=true` (default in this stack); only flip it off for real AWS S3 |
-| History Server shows no apps | App is still running; or event log dir doesn't exist | Stop the SparkSession (`spark.stop()`), then refresh after ~15 s |
-
 ## Architecture
 
-```
-                  ┌────────────────────────┐
-   :8888 ────────►│  JupyterLab (PySpark)  │
-                  └────────────┬───────────┘
-                               │ spark://spark-master:7077
-                               ▼
-       :8080 ┌──────────────────────────────┐
-             │       Spark Master           │
-             └────────────┬─────────────────┘
-                          │
-                          ▼
-       :8081 ┌──────────────────────────────┐
-             │       Spark Worker           │
-             └──────────────┬───────────────┘
-                            │                       :18080
-                            │       ┌──────────────────────────────┐
-                            │       │     Spark History Server     │
-                            │       └──────────────┬───────────────┘
-                            │                      │
-                            ▼  s3a://              ▼  s3a://spark-logs/events
-                  ┌────────────────────────────────────────┐
-                  │            MinIO  (S3 API)             │  :9000 / :9001
-                  │   spark-warehouse / spark-logs / raw   │
-                  └────────────────────────────────────────┘
-                            ▲
-                            │ S3FileIO
-                            │
-                  ┌─────────┴──────────────┐
-                  │ Iceberg REST Catalog   │  :8181
-                  │ namespace: demo        │
-                  └────────────────────────┘
-```
+See [docs/architecture.md](docs/architecture.md) for service topology, boot order, and Delta + Iceberg write-path diagrams (rendered as Mermaid on GitHub).
+
+## Troubleshooting
+
+See [docs/howto.md § Troubleshooting](docs/howto.md#10-troubleshooting) for the full table. Quick hits:
+
+- **403 on S3A writes** → hadoop-aws / aws-sdk-bundle version skew. Don't change the ARGs in `spark/Dockerfile`.
+- **`PYTHON_VERSION_MISMATCH`** → driver and worker Python minor versions differ. Both images pin 3.11; rebuild after `apt` upgrades.
+- **History Server empty** → call `spark.stop()` in the notebook, refresh after ~15 s.
 
 ## Out of scope (deliberately)
 
@@ -184,8 +154,11 @@ Rebuild only the Spark image: `docker compose build spark-master && docker compo
 ├── docker-compose.yml
 ├── .env.example
 ├── README.md
+├── docs/
+│   ├── architecture.md       # Mermaid diagrams: topology, boot order, write paths
+│   └── howto.md              # Step-by-step recipes + troubleshooting
 ├── spark/
-│   ├── Dockerfile             # Spark 3.5.3 + Delta/Iceberg/hadoop-aws JARs
+│   ├── Dockerfile             # Spark 3.5.8 + Delta/Iceberg/hadoop-aws JARs
 │   ├── spark-defaults.conf    # rendered with envsubst at container start
 │   ├── log4j2.properties
 │   └── entrypoint.sh          # SPARK_ROLE -> master | worker | history
