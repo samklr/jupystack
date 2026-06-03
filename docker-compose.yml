@@ -29,11 +29,6 @@ services:
     volumes:
       - minio-data:/data
     command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 
   minio-init:
     image: minio/mc:RELEASE.2024-10-08T09-37-26Z
@@ -41,7 +36,7 @@ services:
     networks: [sparknet]
     depends_on:
       minio:
-        condition: service_healthy
+        condition: service_started
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -73,11 +68,6 @@ services:
       CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_SECRET_KEY}
     volumes:
       - iceberg-data:/tmp/warehouse
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8181/v1/config || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 
   iceberg-init:
     image: curlimages/curl:8.10.1
@@ -85,19 +75,28 @@ services:
     networks: [sparknet]
     depends_on:
       iceberg-rest:
-        condition: service_healthy
+        condition: service_started
     entrypoint:
       - sh
       - -c
       - |
         set -e
-        # Idempotent: 409 (already exists) is fine.
-        code=$$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-          -H 'Content-Type: application/json' \
-          -d '{"namespace":["demo"]}' \
-          http://iceberg-rest:8181/v1/namespaces)
-        echo "create demo namespace -> HTTP $$code"
-        [ "$$code" = "200" ] || [ "$$code" = "201" ] || [ "$$code" = "204" ] || [ "$$code" = "409" ]
+        # Iceberg REST may report /v1/config healthy a moment before /v1/namespaces is wired.
+        # Retry up to 30 times (60 s) before giving up.
+        for i in $$(seq 1 30); do
+          code=$$(curl -s -o /tmp/resp -w "%{http_code}" -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"namespace":["demo"]}' \
+            http://iceberg-rest:8181/v1/namespaces) || code=000
+          echo "[$$i] create demo namespace -> HTTP $$code"
+          case "$$code" in
+            200|201|204|409) echo "ok"; exit 0 ;;
+          esac
+          sleep 2
+        done
+        echo "FAILED to create namespace after 30 attempts; last response:"
+        cat /tmp/resp
+        exit 1
     restart: "no"
 
   # ----------------------------------------------------------------------------
@@ -197,8 +196,6 @@ services:
       - ./jupyter/notebooks:/home/jovyan/work
     depends_on:
       spark-master:
-        condition: service_healthy
-      iceberg-rest:
         condition: service_healthy
       iceberg-init:
         condition: service_completed_successfully
