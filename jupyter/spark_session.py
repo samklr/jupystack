@@ -45,17 +45,9 @@ def get_spark(app_name: str = "jupyter-demo") -> SparkSession:
         .config("spark.sql.catalog.iceberg.type", "rest")
         .config("spark.sql.catalog.iceberg.uri", "http://iceberg-rest:8181")
         .config("spark.sql.catalog.iceberg.warehouse", "s3a://spark-warehouse/iceberg")
-        .config(
-            "spark.sql.catalog.iceberg.io-impl",
-            "org.apache.iceberg.aws.s3.S3FileIO",
-        )
-        .config("spark.sql.catalog.iceberg.s3.endpoint", minio_endpoint)
-        .config("spark.sql.catalog.iceberg.s3.path-style-access", "true")
-        .config("spark.sql.catalog.iceberg.s3.access-key-id", access_key)
-        .config("spark.sql.catalog.iceberg.s3.secret-access-key", secret_key)
-        # AWS SDK v2 requires a region even for MinIO; any value works.
-        .config("spark.sql.catalog.iceberg.client.region", "us-east-1")
-        .config("spark.sql.catalog.iceberg.s3.region", "us-east-1")
+        # HadoopFileIO reuses the S3A connector (same as Delta). S3FileIO via
+        # AWS SDK v2 has native bits that crash with SIGABRT on Apple Silicon.
+        .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO")
         # Event logs → MinIO so the History Server picks them up
         .config("spark.eventLog.enabled", "true")
         .config("spark.eventLog.dir", "s3a://spark-logs/events")
