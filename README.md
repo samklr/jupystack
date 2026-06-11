@@ -40,6 +40,7 @@ Then open **http://localhost:8888/lab** and run the notebooks in order:
 5. `04_ingest_open_data.ipynb` — downloads **MovieLens** (CSV) + **Wikipedia pageviews** (JSON) into `s3a://raw-data/`.
 6. `05_etl_delta_lakehouse.ipynb` — bronze → silver → gold medallion on the open data, with `MERGE INTO` and `DESCRIBE HISTORY`.
 7. `06_etl_iceberg_lakehouse.ipynb` — same dataset, Iceberg flavour, with hidden partitioning, snapshot metadata tables, and snapshot-id time travel.
+8. `07_scd_delta_lake.ipynb` — Slowly Changing Dimensions (Type 1 & Type 2) with Delta `MERGE INTO`.
 
 End-to-end smoke test (after the stack is healthy):
 
